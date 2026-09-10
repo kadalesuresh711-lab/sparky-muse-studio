@@ -1,7 +1,7 @@
 import type { Segment } from "./script";
 import { pixazoKeys, pickKey } from "./keys.server";
 import { textChat } from "./text-engine.server";
-import { assertRunAlive, killableSignal, KilledError } from "./kill-switch.server";
+import { assertActive, killableSignal, KilledError } from "./kill-switch.server";
 
 const PIXAZO_URL = "https://gateway.pixazo.ai/flux-1-schnell/v1/getData";
 // A single provider attempt must settle quickly enough for the browser queue to
@@ -1330,7 +1330,7 @@ export async function generateImage(
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     const key = pickKey(keys, slot, attempt);
     // A killed run never spends another image credit.
-    assertRunAlive();
+    assertActive();
     const gate = killableSignal(IMAGE_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(PIXAZO_URL, {
@@ -1373,7 +1373,7 @@ export async function generateImage(
       if (e instanceof KilledError) throw e;
       lastErr = e instanceof Error ? e.message : String(e);
       console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1} threw: ${lastErr}`);
-      assertRunAlive();
+      assertActive();
     } finally {
       gate.release();
     }
