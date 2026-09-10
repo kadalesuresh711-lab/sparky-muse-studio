@@ -24,7 +24,7 @@ export const analyzeScript = createServerFn({ method: "POST" })
     }
     const bible = await buildCharacterBible(data.script);
     return { segments, bible, engine: engineStatus() };
-    }),
+    }, signal),
   );
 
 /**
@@ -52,7 +52,7 @@ export const promptsForRange = createServerFn({ method: "POST" })
     withRun(data.runAt, async () => {
       const prompts = await writePrompts(data.bible, data.segments, data.from, data.to);
       return { from: data.from, to: data.to, prompts, engine: engineStatus() };
-    }),
+    }, signal),
   );
 
 export const renderImage = createServerFn({ method: "POST" })
@@ -80,7 +80,7 @@ export const renderImage = createServerFn({ method: "POST" })
       data.timestamp,
     );
     return { url, prompt, rewritten };
-    }),
+    }, signal),
   );
 
 /**
@@ -148,5 +148,5 @@ export const renderBatch = createServerFn({ method: "POST" })
       `[render] batch DONE panels ${idx} in ${Date.now() - t0}ms: ${ok}/${results.length} rendered`,
     );
     return { results };
-    }),
+    }, signal),
   );
