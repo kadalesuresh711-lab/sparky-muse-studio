@@ -413,7 +413,9 @@ export async function writePrompts(
         `recognisable as that line:\n${listing}\n\n` +
         `Output exactly ${want.length} lines, numbered with each line's OWN number` +
         `${contiguous ? ` (${first} to ${last})` : ` (${want.join(", ")})`}, then ') ', ` +
-        `then the prompt on that same single line. Nothing else.`,
+        `then that same line's OWN start time copied exactly from the list above in square ` +
+        `brackets (for example "12) [86s] ..."), then the prompt, all on that same single line. ` +
+        `The number and the start time must both belong to the line the prompt draws. Nothing else.`,
       {
         temperature: temp,
         maxOutputTokens: Math.min(32_000, 800 + want.length * 200),
