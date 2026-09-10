@@ -18,7 +18,7 @@ export class KilledError extends Error {
   }
 }
 
-type RunContext = { runAt: number };
+type RunContext = { runAt: number; abort?: AbortSignal | undefined };
 
 const runStore = new AsyncLocalStorage<RunContext>();
 
