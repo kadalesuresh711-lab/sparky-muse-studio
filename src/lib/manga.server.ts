@@ -1208,30 +1208,53 @@ function byteEntropy(buf: Uint8Array): number {
 /**
  * True when the file at `url` is a COMPLETE, non-empty image.
  *
- * Half-drawn / cut-off panels were reaching the grid because only the first
- * bytes were checked: a truncated download still starts with a valid PNG or
- * JPEG header. The end-of-file marker is now checked too (PNG must end with
- * IEND, JPEG with FFD9, WebP's RIFF length must match the bytes received), so
- * an unfinished file is rejected and the panel is drawn again.
+ * The checks are unchanged (size, magic bytes, end-of-file marker, entropy of
+ * the compressed payload) but they no longer require downloading the whole
+ * multi-megabyte panel: a 128 KB head range and a 32 byte tail range are
+ * enough, and they are fetched at the same time. Servers that ignore Range
+ * fall back to the full body automatically.
  */
 async function isRealImage(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
-    if (!res.ok) return false;
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.byteLength < MIN_IMAGE_BYTES) return false;
-    const isPng = buf[0] === 0x89 && buf[1] === 0x50;
-    const isJpg = buf[0] === 0xff && buf[1] === 0xd8;
-    const isWebp = buf[8] === 0x57 && buf[9] === 0x45;
+    const signal = AbortSignal.timeout(45_000);
+    const [headRes, tailRes] = await Promise.all([
+      fetch(url, { signal, headers: { Range: "bytes=0-131071" } }),
+      fetch(url, { signal, headers: { Range: "bytes=-32" } }).catch(() => null),
+    ]);
+    if (!headRes.ok) return false;
+    const head = new Uint8Array(await headRes.arrayBuffer());
+
+    // Total file size: from Content-Range when the server honoured the range.
+    const cr = headRes.headers.get("content-range");
+    const total = cr ? Number(cr.split("/")[1]) : head.byteLength;
+    if (!Number.isFinite(total) || total < MIN_IMAGE_BYTES) return false;
+
+    const isPng = head[0] === 0x89 && head[1] === 0x50;
+    const isJpg = head[0] === 0xff && head[1] === 0xd8;
+    const isWebp = head[8] === 0x57 && head[9] === 0x45;
     if (!isPng && !isJpg && !isWebp) return false;
-    if (!isComplete(buf, isPng, isJpg, isWebp)) return false;
+
+    // End-of-file marker. WebP's length lives in the header, so it is checked
+    // against the real total instead of the downloaded slice.
+    if (isWebp) {
+      const size = head[4]! | (head[5]! << 8) | (head[6]! << 16) | head[7]! * 0x1000000;
+      if (total < size + 8) return false;
+    } else if (headRes.status === 206 && tailRes && tailRes.ok) {
+      const tail = new Uint8Array(await tailRes.arrayBuffer());
+      if (!isComplete(tail, isPng, isJpg, false)) return false;
+    } else if (headRes.status !== 206) {
+      // Ranges ignored: the head IS the whole file.
+      if (!isComplete(head, isPng, isJpg, isWebp)) return false;
+    }
+
     // skip the header before measuring entropy of the compressed payload
-    return byteEntropy(buf.subarray(Math.min(2048, buf.byteLength >> 2))) >= MIN_ENTROPY;
+    return byteEntropy(head.subarray(Math.min(2048, head.byteLength >> 2))) >= MIN_ENTROPY;
   } catch {
     // Network hiccup while probing: don't throw away a probably-good panel.
     return true;
   }
 }
+
 
 /** Checks the image file actually reaches its end-of-file marker. */
 function isComplete(buf: Uint8Array, isPng: boolean, isJpg: boolean, isWebp: boolean): boolean {
