@@ -73,7 +73,7 @@ export function assertActive(): void {
  * if the run is already dead.
  */
 export function killableSignal(timeoutMs: number): { signal: AbortSignal; release: () => void } {
-  assertRunAlive();
+  assertActive();
   const runAt = currentRunAt() ?? Number.POSITIVE_INFINITY;
   const controller = new AbortController();
   const entry: LiveRequest = { runAt, controller };
@@ -84,10 +84,20 @@ export function killableSignal(timeoutMs: number): { signal: AbortSignal; releas
   if (timeout.aborted) onTimeout();
   else timeout.addEventListener("abort", onTimeout, { once: true });
 
+  // The caller hanging up kills this upstream call immediately, so the API key
+  // it occupies is free for the next job instead of finishing a dead render.
+  const caller = runStore.getStore()?.abort;
+  const onCallerGone = () => controller.abort(new KilledError());
+  if (caller) {
+    if (caller.aborted) onCallerGone();
+    else caller.addEventListener("abort", onCallerGone, { once: true });
+  }
+
   return {
     signal: controller.signal,
     release: () => {
       timeout.removeEventListener("abort", onTimeout);
+      caller?.removeEventListener("abort", onCallerGone);
       live.delete(entry);
     },
   };
