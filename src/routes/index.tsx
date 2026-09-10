@@ -120,8 +120,8 @@ const PROMPT_RANGE = 60;
  * queue in the network stack and never reach the renderer. Throughput comes
  * from batching instead: 6 lanes x 4 prompts = 24 images rendered at once.
  */
-const IMAGE_CONCURRENCY = 6;
-const IMAGE_BATCH = 4;
+const IMAGE_CONCURRENCY = 12;
+const IMAGE_BATCH = 8;
 /**
  * The server already downloads and validates every finished image (complete
  * file + entropy) before returning its URL, so re-downloading and decoding it
