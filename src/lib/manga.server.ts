@@ -413,7 +413,9 @@ export async function writePrompts(
         `recognisable as that line:\n${listing}\n\n` +
         `Output exactly ${want.length} lines, numbered with each line's OWN number` +
         `${contiguous ? ` (${first} to ${last})` : ` (${want.join(", ")})`}, then ') ', ` +
-        `then the prompt on that same single line. Nothing else.`,
+        `then that same line's OWN start time copied exactly from the list above in square ` +
+        `brackets (for example "12) [86s] ..."), then the prompt, all on that same single line. ` +
+        `The number and the start time must both belong to the line the prompt draws. Nothing else.`,
       {
         temperature: temp,
         maxOutputTokens: Math.min(32_000, 800 + want.length * 200),
@@ -451,6 +453,36 @@ export async function writePrompts(
     const wantSet = new Set(want);
     const first = want[0] as number;
     const last = want[want.length - 1] as number;
+
+    // TIMESTAMP ECHO (authoritative). Each prompt repeats its own line's start
+    // time. When every prompt carries one and they map cleanly onto distinct
+    // requested lines, that mapping wins over the answer's numbering — this is
+    // what stops a whole range sliding one line late.
+    const echoed: { n: number; text: string }[] = [];
+    let echoes = 0;
+    for (const e of entries) {
+      const m = /^\[\s*(\d+(?:\.\d+)?)\s*s?\s*\]\s*/.exec(e.text);
+      if (!m) {
+        echoed.push(e);
+        continue;
+      }
+      echoes++;
+      const at = Number(m[1]);
+      const body = e.text.slice(m[0].length).trim();
+      const hit = want.find((n) => Math.abs(((all[n - 1] as Segment).start ?? -1) - at) < 0.5);
+      echoed.push({ n: hit ?? e.n, text: body });
+    }
+    if (echoes === entries.length && echoes > 0) {
+      const keys = echoed.map((e) => e.n);
+      const unique = new Set(keys).size === keys.length;
+      if (unique && keys.every((n) => wantSet.has(n))) {
+        for (const e of echoed) accept(e.n, e.text);
+        return;
+      }
+    }
+    // No usable echo: fall back to the numbering rules below, with any echo
+    // prefix stripped so it never leaks into the image prompt.
+    entries.splice(0, entries.length, ...echoed);
 
     // TIMESTAMP ALIGNMENT (this is what used to shift panels onto the wrong
     // moment). Two numbering styles come back:
