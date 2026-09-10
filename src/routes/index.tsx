@@ -195,6 +195,21 @@ function stamp(): { runAt?: number } {
   return runAt ? { runAt } : {};
 }
 
+/**
+ * Every server call is made cancellable and registered with Insta Kill, so one
+ * click hangs up on the server too — the API keys are dropped mid-job instead
+ * of finishing work nobody is waiting for.
+ */
+async function killable<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const untrack = trackRequest(controller);
+  try {
+    return await run(controller.signal);
+  } finally {
+    untrack();
+  }
+}
+
 async function getPrompts(input: PromptRequest): Promise<{ prompts: string[] }> {
   const label = `${input.from}-${input.to}`;
   const t0 = Date.now();
