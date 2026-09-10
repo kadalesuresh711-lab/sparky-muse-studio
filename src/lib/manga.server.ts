@@ -1247,9 +1247,9 @@ function byteEntropy(buf: Uint8Array): number {
  * fall back to the full body automatically.
  */
 async function isRealImage(url: string): Promise<boolean> {
+  const gate = killableSignal(45_000);
+  const signal = gate.signal;
   try {
-    const gate = killableSignal(45_000);
-    const signal = gate.signal;
     const [headRes, tailRes] = await Promise.all([
       fetch(url, { signal, headers: { Range: "bytes=0-131071" } }),
       fetch(url, { signal, headers: { Range: "bytes=-32" } }).catch(() => null),
