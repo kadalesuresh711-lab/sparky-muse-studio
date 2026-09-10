@@ -36,11 +36,35 @@ export function assertRunAlive(runAt: number | undefined = currentRunAt()): void
   if (typeof runAt === "number" && runAt <= killEpoch) throw new KilledError();
 }
 
-/** Wraps one server handler so everything it awaits belongs to the same run. */
-export function withRun<T>(runAt: number | undefined, fn: () => Promise<T>): Promise<T> {
+/**
+ * Wraps one server handler so everything it awaits belongs to the same run.
+ *
+ * `abort` is the INCOMING request's own signal. The kill epoch only reaches
+ * work running in the same server instance, so a browser that drops its
+ * requests is the second, instance-proof half of Insta Kill: as soon as the
+ * page aborts, every upstream call this handler owns is aborted too and the
+ * API key is released instead of finishing its job in the background.
+ */
+export function withRun<T>(
+  runAt: number | undefined,
+  fn: () => Promise<T>,
+  abort?: AbortSignal | undefined,
+): Promise<T> {
   const at = typeof runAt === "number" && runAt > 0 ? runAt : Date.now();
   assertRunAlive(at);
-  return runStore.run({ runAt: at }, fn);
+  if (abort?.aborted) throw new KilledError();
+  return runStore.run({ runAt: at, abort }, fn);
+}
+
+/** True when the caller that started this run has gone away. */
+export function callerGone(): boolean {
+  return runStore.getStore()?.abort?.aborted === true;
+}
+
+/** Throws as soon as the run is killed OR its caller dropped the request. */
+export function assertActive(): void {
+  assertRunAlive();
+  if (callerGone()) throw new KilledError("Stopped — the request was cancelled.");
 }
 
 /**
