@@ -1286,6 +1286,8 @@ async function isRealImage(url: string): Promise<boolean> {
     if (e instanceof KilledError) throw e;
     // Network hiccup while probing: don't throw away a probably-good panel.
     return true;
+  } finally {
+    gate.release();
   }
 }
 
