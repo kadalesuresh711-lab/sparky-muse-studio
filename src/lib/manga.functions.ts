@@ -16,7 +16,7 @@ export const analyzeScript = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({ script: z.string().min(5), runAt: z.number().optional() }).parse(d),
   )
-  .handler(async ({ data }) =>
+  .handler(async ({ data, signal }) =>
     withRun(data.runAt, async () => {
     const segments = parseScript(data.script);
     if (segments.length === 0) {
@@ -48,7 +48,7 @@ export const promptsForRange = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
+  .handler(async ({ data, signal }) =>
     withRun(data.runAt, async () => {
       const prompts = await writePrompts(data.bible, data.segments, data.from, data.to);
       return { from: data.from, to: data.to, prompts, engine: engineStatus() };
@@ -69,7 +69,7 @@ export const renderImage = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
+  .handler(async ({ data, signal }) =>
     withRun(data.runAt, async () => {
     const { url, prompt, rewritten } = await renderPanel(
       data.prompt,
@@ -109,7 +109,7 @@ export const renderBatch = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
+  .handler(async ({ data, signal }) =>
     withRun(data.runAt, async () => {
     const t0 = Date.now();
     const idx = data.jobs.map((j) => j.index).join(",");
