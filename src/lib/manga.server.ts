@@ -1345,7 +1345,7 @@ export async function generateImage(
     } finally {
       gate.release();
     }
-    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
   }
   throw new Error(`Image generation failed: ${lastErr}`);
 }
@@ -1442,7 +1442,7 @@ export async function renderPanel(
       errors.push(`round ${round + 1}: ${msg}`);
       if (contentRefusal(msg)) refused = true;
     }
-    await new Promise((r) => setTimeout(r, 600 * (round + 1)));
+    await new Promise((r) => setTimeout(r, 250 * (round + 1)));
   }
 
   // Only a content refusal earns a rewrite, and only softening — same scene,
@@ -1459,7 +1459,7 @@ export async function renderPanel(
           if (e instanceof KilledError) throw e;
           errors.push(`softened ${round + 1}: ${e instanceof Error ? e.message : String(e)}`);
         }
-        await new Promise((r) => setTimeout(r, 700 * (round + 1)));
+        await new Promise((r) => setTimeout(r, 300 * (round + 1)));
       }
     }
   }
