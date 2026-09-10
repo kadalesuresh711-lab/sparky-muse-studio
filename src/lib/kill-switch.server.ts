@@ -18,7 +18,7 @@ export class KilledError extends Error {
   }
 }
 
-type RunContext = { runAt: number };
+type RunContext = { runAt: number; abort?: AbortSignal | undefined };
 
 const runStore = new AsyncLocalStorage<RunContext>();
 
@@ -36,11 +36,35 @@ export function assertRunAlive(runAt: number | undefined = currentRunAt()): void
   if (typeof runAt === "number" && runAt <= killEpoch) throw new KilledError();
 }
 
-/** Wraps one server handler so everything it awaits belongs to the same run. */
-export function withRun<T>(runAt: number | undefined, fn: () => Promise<T>): Promise<T> {
+/**
+ * Wraps one server handler so everything it awaits belongs to the same run.
+ *
+ * `abort` is the INCOMING request's own signal. The kill epoch only reaches
+ * work running in the same server instance, so a browser that drops its
+ * requests is the second, instance-proof half of Insta Kill: as soon as the
+ * page aborts, every upstream call this handler owns is aborted too and the
+ * API key is released instead of finishing its job in the background.
+ */
+export function withRun<T>(
+  runAt: number | undefined,
+  fn: () => Promise<T>,
+  abort?: AbortSignal | undefined,
+): Promise<T> {
   const at = typeof runAt === "number" && runAt > 0 ? runAt : Date.now();
   assertRunAlive(at);
-  return runStore.run({ runAt: at }, fn);
+  if (abort?.aborted) throw new KilledError();
+  return runStore.run({ runAt: at, abort }, fn);
+}
+
+/** True when the caller that started this run has gone away. */
+export function callerGone(): boolean {
+  return runStore.getStore()?.abort?.aborted === true;
+}
+
+/** Throws as soon as the run is killed OR its caller dropped the request. */
+export function assertActive(): void {
+  assertRunAlive();
+  if (callerGone()) throw new KilledError("Stopped — the request was cancelled.");
 }
 
 /**
@@ -49,7 +73,7 @@ export function withRun<T>(runAt: number | undefined, fn: () => Promise<T>): Pro
  * if the run is already dead.
  */
 export function killableSignal(timeoutMs: number): { signal: AbortSignal; release: () => void } {
-  assertRunAlive();
+  assertActive();
   const runAt = currentRunAt() ?? Number.POSITIVE_INFINITY;
   const controller = new AbortController();
   const entry: LiveRequest = { runAt, controller };
@@ -60,10 +84,20 @@ export function killableSignal(timeoutMs: number): { signal: AbortSignal; releas
   if (timeout.aborted) onTimeout();
   else timeout.addEventListener("abort", onTimeout, { once: true });
 
+  // The caller hanging up kills this upstream call immediately, so the API key
+  // it occupies is free for the next job instead of finishing a dead render.
+  const caller = runStore.getStore()?.abort;
+  const onCallerGone = () => controller.abort(new KilledError());
+  if (caller) {
+    if (caller.aborted) onCallerGone();
+    else caller.addEventListener("abort", onCallerGone, { once: true });
+  }
+
   return {
     signal: controller.signal,
     release: () => {
       timeout.removeEventListener("abort", onTimeout);
+      caller?.removeEventListener("abort", onCallerGone);
       live.delete(entry);
     },
   };

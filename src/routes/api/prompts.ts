@@ -74,8 +74,12 @@ export const Route = createFileRoute("/api/prompts")({
             send("started", { from: input.from, to: input.to });
             heartbeat = setInterval(() => send("heartbeat", { at: Date.now() }), 10_000);
 
-            void withRun(input.runAt, () =>
-              writePrompts(input.bible, input.segments, input.from, input.to),
+            void withRun(
+              input.runAt,
+              () => writePrompts(input.bible, input.segments, input.from, input.to),
+              // The browser dropping this request (Insta Kill, refresh, closed
+              // tab) aborts the upstream work at once, freeing the key.
+              request.signal,
             )
               .then((prompts) => send("result", { prompts }))
               .catch((error) =>

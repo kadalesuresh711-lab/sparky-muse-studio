@@ -10,7 +10,7 @@
  *    browser and never written into the codebase.
  */
 
-import { assertRunAlive, killableSignal, KilledError } from "./kill-switch.server";
+import { assertActive, killableSignal, KilledError } from "./kill-switch.server";
 
 const API = "https://apihub.agnes-ai.com/v1/chat/completions";
 
@@ -55,10 +55,10 @@ async function backoff(ms: number): Promise<void> {
   const total = Math.max(0, Math.min(ms, MAX_RETRY_DELAY_MS));
   const step = 250;
   for (let waited = 0; waited < total; waited += step) {
-    assertRunAlive();
+    assertActive();
     await sleep(Math.min(step, total - waited));
   }
-  assertRunAlive();
+  assertActive();
 }
 
 /**
@@ -83,7 +83,7 @@ async function acquire(): Promise<void> {
     });
   }
   // Whatever happened while queueing, a killed run never takes the slot.
-  assertRunAlive();
+  assertActive();
   inFlight++;
   const gap = MIN_GAP_MS - (Date.now() - lastUsed);
   if (gap > 0) await sleep(gap);
@@ -133,7 +133,7 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
     for (let attempt = 0; attempt < attempts; attempt++) {
       const started = Date.now();
       // A killed run never makes another upstream request.
-      assertRunAlive();
+      assertActive();
       console.log(
         `[agnes] request attempt ${attempt + 1}/${attempts} model=${model()} inChars=${user.length} maxOut=${Math.min(MAX_OUT, opts.maxOutputTokens ?? 16_000)} inFlight=${inFlight}`,
       );
@@ -201,7 +201,7 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
         if (e instanceof KilledError) throw e;
         lastErr = e instanceof Error ? e.message : String(e);
         console.error(`[agnes] attempt ${attempt + 1} threw after ${Date.now() - started}ms: ${lastErr}`);
-        assertRunAlive();
+        assertActive();
         await backoff(1_000 * (attempt + 1));
       } finally {
         gate.release();

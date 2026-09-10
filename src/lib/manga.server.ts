@@ -1,7 +1,7 @@
 import type { Segment } from "./script";
 import { pixazoKeys, pickKey } from "./keys.server";
 import { textChat } from "./text-engine.server";
-import { assertRunAlive, killableSignal, KilledError } from "./kill-switch.server";
+import { assertActive, killableSignal, KilledError } from "./kill-switch.server";
 
 const PIXAZO_URL = "https://gateway.pixazo.ai/flux-1-schnell/v1/getData";
 // A single provider attempt must settle quickly enough for the browser queue to
@@ -1247,8 +1247,9 @@ function byteEntropy(buf: Uint8Array): number {
  * fall back to the full body automatically.
  */
 async function isRealImage(url: string): Promise<boolean> {
+  const gate = killableSignal(45_000);
+  const signal = gate.signal;
   try {
-    const signal = AbortSignal.timeout(45_000);
     const [headRes, tailRes] = await Promise.all([
       fetch(url, { signal, headers: { Range: "bytes=0-131071" } }),
       fetch(url, { signal, headers: { Range: "bytes=-32" } }).catch(() => null),
@@ -1281,9 +1282,12 @@ async function isRealImage(url: string): Promise<boolean> {
 
     // skip the header before measuring entropy of the compressed payload
     return byteEntropy(head.subarray(Math.min(2048, head.byteLength >> 2))) >= MIN_ENTROPY;
-  } catch {
+  } catch (e) {
+    if (e instanceof KilledError) throw e;
     // Network hiccup while probing: don't throw away a probably-good panel.
     return true;
+  } finally {
+    gate.release();
   }
 }
 
@@ -1312,6 +1316,16 @@ function isComplete(buf: Uint8Array, isPng: boolean, isJpg: boolean, isWebp: boo
 }
 
 
+/** A wait that ends the moment the run is killed or the caller hangs up. */
+async function pause(ms: number): Promise<void> {
+  const step = 100;
+  for (let waited = 0; waited < ms; waited += step) {
+    assertActive();
+    await new Promise((r) => setTimeout(r, Math.min(step, ms - waited)));
+  }
+  assertActive();
+}
+
 /** Calls Flux.1 Schnell (free tier) at max quality with automatic retries. Always 16:9. */
 export async function generateImage(
   prompt: string,
@@ -1330,7 +1344,7 @@ export async function generateImage(
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     const key = pickKey(keys, slot, attempt);
     // A killed run never spends another image credit.
-    assertRunAlive();
+    assertActive();
     const gate = killableSignal(IMAGE_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(PIXAZO_URL, {
@@ -1373,11 +1387,11 @@ export async function generateImage(
       if (e instanceof KilledError) throw e;
       lastErr = e instanceof Error ? e.message : String(e);
       console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1} threw: ${lastErr}`);
-      assertRunAlive();
+      assertActive();
     } finally {
       gate.release();
     }
-    await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    await pause(200 * (attempt + 1));
   }
   throw new Error(`Image generation failed: ${lastErr}`);
 }
@@ -1474,7 +1488,7 @@ export async function renderPanel(
       errors.push(`round ${round + 1}: ${msg}`);
       if (contentRefusal(msg)) refused = true;
     }
-    await new Promise((r) => setTimeout(r, 250 * (round + 1)));
+    await pause(250 * (round + 1));
   }
 
   // Only a content refusal earns a rewrite, and only softening — same scene,
@@ -1491,7 +1505,7 @@ export async function renderPanel(
           if (e instanceof KilledError) throw e;
           errors.push(`softened ${round + 1}: ${e instanceof Error ? e.message : String(e)}`);
         }
-        await new Promise((r) => setTimeout(r, 300 * (round + 1)));
+        await pause(300 * (round + 1));
       }
     }
   }

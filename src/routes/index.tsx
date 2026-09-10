@@ -195,6 +195,21 @@ function stamp(): { runAt?: number } {
   return runAt ? { runAt } : {};
 }
 
+/**
+ * Every server call is made cancellable and registered with Insta Kill, so one
+ * click hangs up on the server too — the API keys are dropped mid-job instead
+ * of finishing work nobody is waiting for.
+ */
+async function killable<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const untrack = trackRequest(controller);
+  try {
+    return await run(controller.signal);
+  } finally {
+    untrack();
+  }
+}
+
 async function getPrompts(input: PromptRequest): Promise<{ prompts: string[] }> {
   const label = `${input.from}-${input.to}`;
   const t0 = Date.now();
@@ -512,7 +527,9 @@ function Index() {
         list = recoverInterruptedShots(existing);
       } else {
         setNote("Reading script and locking character designs…");
-        const res = await analyze({ data: { script: sourceScript, ...stamp() } });
+        const res = await killable((signal) =>
+          analyze({ data: { script: sourceScript, ...stamp() }, signal }),
+        );
         b = res.bible;
         list = res.segments.map((s) => ({ ...s, status: "waiting" as const }));
       }
@@ -735,20 +752,23 @@ function Index() {
             `[client] worker ${me} drawing panels ${group.map((g) => g.seg.index + 1).join(",")} · queue=${queue.length}`,
           );
           try {
-            const { results } = await drawBatch({
-              data: {
-                ...stamp(),
-                bible: b,
-                jobs: group.map((g) => ({
-                  index: g.seg.index,
-                  prompt: g.prompt,
-                  seed: 1000 + g.seg.index + g.attempts * 7919,
-                  slot: keyTick++,
-                  line: g.seg.text,
-                  timestamp: `${g.seg.start}s-${g.seg.end}s`,
-                })),
-              },
-            });
+            const { results } = await killable((signal) =>
+              drawBatch({
+                data: {
+                  ...stamp(),
+                  bible: b,
+                  jobs: group.map((g) => ({
+                    index: g.seg.index,
+                    prompt: g.prompt,
+                    seed: 1000 + g.seg.index + g.attempts * 7919,
+                    slot: keyTick++,
+                    line: g.seg.text,
+                    timestamp: `${g.seg.start}s-${g.seg.end}s`,
+                  })),
+                },
+                signal,
+              }),
+            );
             await Promise.all(
               results.map(async (r) => {
                 const job = group.find((g) => g.seg.index === r.index);
@@ -764,17 +784,20 @@ function Index() {
                     url = null;
                     if (!prompt) break;
                     try {
-                      const res = await draw({
-                        data: {
-                          ...stamp(),
-                          prompt,
-                          seed: 1000 + r.index + attempt * 7919,
-                          bible: b,
-                          slot: keyTick++,
-                          line: job?.seg.text,
-                          ...(job ? { timestamp: `${job.seg.start}s-${job.seg.end}s` } : {}),
-                        },
-                      });
+                      const res = await killable((signal) =>
+                        draw({
+                          data: {
+                            ...stamp(),
+                            prompt,
+                            seed: 1000 + r.index + attempt * 7919,
+                            bible: b,
+                            slot: keyTick++,
+                            line: job?.seg.text,
+                            ...(job ? { timestamp: `${job.seg.start}s-${job.seg.end}s` } : {}),
+                          },
+                          signal,
+                        }),
+                      );
                       url = res.url;
                     } catch {
                       url = null;
@@ -899,17 +922,20 @@ function Index() {
       let last = "render failed";
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const res = await draw({
-            data: {
-              ...stamp(),
-              prompt,
-              seed: 10_000 + shot.index * 31 + Math.floor(Math.random() * 900_000),
-              slot: slotBase + attempt,
-              bible,
-              line: shot.text,
-              timestamp: `${shot.start}s-${shot.end}s`,
-            },
-          });
+          const res = await killable((signal) =>
+            draw({
+              data: {
+                ...stamp(),
+                prompt,
+                seed: 10_000 + shot.index * 31 + Math.floor(Math.random() * 900_000),
+                slot: slotBase + attempt,
+                bible,
+                line: shot.text,
+                timestamp: `${shot.start}s-${shot.end}s`,
+              },
+              signal,
+            }),
+          );
           const url = res.url;
           if (url && !(await isBlankImageUrl(url))) {
             record(shot.index, {

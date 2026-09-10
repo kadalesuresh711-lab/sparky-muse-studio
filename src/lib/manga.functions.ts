@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { parseScript } from "./script";
 import { buildCharacterBible, writePrompts, renderPanel } from "./manga.server";
@@ -16,16 +17,19 @@ export const analyzeScript = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({ script: z.string().min(5), runAt: z.number().optional() }).parse(d),
   )
-  .handler(async ({ data }) =>
-    withRun(data.runAt, async () => {
+  .handler(async ({ data }) => {
+    // Hanging up (Insta Kill, refresh, closed tab) aborts the upstream work
+    // right away, so the API key it holds is free for the next job.
+    const signal = getRequest().signal;
+    return withRun(data.runAt, async () => {
     const segments = parseScript(data.script);
     if (segments.length === 0) {
       throw new Error("No timestamps found. Each line needs a time like 0:00, (0:00) or [0:00].");
     }
     const bible = await buildCharacterBible(data.script);
     return { segments, bible, engine: engineStatus() };
-    }),
-  );
+    }, signal);
+  });
 
 /**
  * One storyboard pass.
@@ -48,12 +52,15 @@ export const promptsForRange = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
-    withRun(data.runAt, async () => {
+  .handler(async ({ data }) => {
+    // Hanging up (Insta Kill, refresh, closed tab) aborts the upstream work
+    // right away, so the API key it holds is free for the next job.
+    const signal = getRequest().signal;
+    return withRun(data.runAt, async () => {
       const prompts = await writePrompts(data.bible, data.segments, data.from, data.to);
       return { from: data.from, to: data.to, prompts, engine: engineStatus() };
-    }),
-  );
+    }, signal);
+  });
 
 export const renderImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
@@ -69,8 +76,11 @@ export const renderImage = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
-    withRun(data.runAt, async () => {
+  .handler(async ({ data }) => {
+    // Hanging up (Insta Kill, refresh, closed tab) aborts the upstream work
+    // right away, so the API key it holds is free for the next job.
+    const signal = getRequest().signal;
+    return withRun(data.runAt, async () => {
     const { url, prompt, rewritten } = await renderPanel(
       data.prompt,
       data.seed,
@@ -80,8 +90,8 @@ export const renderImage = createServerFn({ method: "POST" })
       data.timestamp,
     );
     return { url, prompt, rewritten };
-    }),
-  );
+    }, signal);
+  });
 
 /**
  * Renders several panels in one round trip. Failures are reported per item so
@@ -109,8 +119,11 @@ export const renderBatch = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) =>
-    withRun(data.runAt, async () => {
+  .handler(async ({ data }) => {
+    // Hanging up (Insta Kill, refresh, closed tab) aborts the upstream work
+    // right away, so the API key it holds is free for the next job.
+    const signal = getRequest().signal;
+    return withRun(data.runAt, async () => {
     const t0 = Date.now();
     const idx = data.jobs.map((j) => j.index).join(",");
     console.log(`[render] batch START panels ${idx}`);
@@ -148,5 +161,5 @@ export const renderBatch = createServerFn({ method: "POST" })
       `[render] batch DONE panels ${idx} in ${Date.now() - t0}ms: ${ok}/${results.length} rendered`,
     );
     return { results };
-    }),
-  );
+    }, signal);
+  });
